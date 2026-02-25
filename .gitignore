@@ -1,0 +1,24 @@
+# Игнорировать папки сборки
+build*/
+cmake-build-*/
+debug/
+release/
+
+# Временные файлы C++
+*.o
+*.obj
+*.exe
+*.dll
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+*.user
+
+# Временные файлы Python
+__pycache__/
+*.pyc
+
+# Системный мусор
+.DS_Store
+Thumbs.db
