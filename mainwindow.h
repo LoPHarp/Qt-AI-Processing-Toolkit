@@ -3,6 +3,8 @@
 
 #include <QMainWindow>
 #include <QProcess>
+#include <QTimer>
+#include <QFileInfo>
 
 QT_BEGIN_NAMESPACE
 namespace Ui {
@@ -21,9 +23,15 @@ public:
 private slots:
     void on_btnTrainModel_clicked();
     void readPythonOutput();
+    void onProcessFinished(int exitCode, QProcess::ExitStatus exitStatus);
+
+    void on_btnSelectModel_clicked();
 
 private:
     Ui::MainWindow *ui;
     QProcess *PyProcess;
+    QString currentModelPath;
+
+    void setModelAsActive(const QString &path);
 };
 #endif // MAINWINDOW_H

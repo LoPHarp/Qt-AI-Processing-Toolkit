@@ -68,3 +68,6 @@ install(TARGETS Qt-AI-Processing-Toolkit
 if(QT_VERSION_MAJOR EQUAL 6)
     qt_finalize_executable(Qt-AI-Processing-Toolkit)
 endif()
+
+file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/train_model.py DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
+file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/training.csv DESTINATION ${CMAKE_CURRENT_BINARY_DIR})

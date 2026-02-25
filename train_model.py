@@ -1,4 +1,8 @@
 import sys
+
+sys.stdout.reconfigure(encoding='utf-8')
+sys.stderr.reconfigure(encoding='utf-8')
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -75,7 +79,7 @@ def train_model(dataset_path, target_acc, save_path):
             avg_loss = total_loss / len(dataloader)
             current_acc = max(0.0, min(1.0, 1.0 - (avg_loss * 15)))
 
-            print(f"Epoch: {epoch}, Accuracy: {current_acc:.2f}")
+            print(f"CURRENT_LEARN_PROGRESS: {current_acc:.4f} CURRENT_EPOCH: {epoch}", flush=True)
             sys.stdout.flush()
             epoch += 1
 
