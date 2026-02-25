@@ -15,10 +15,14 @@ cmake_install.cmake
 Makefile
 *.user
 
-# Временные файлы Python
-__pycache__/
-*.pyc
-
 # Системный мусор
 .DS_Store
 Thumbs.db
+
+# --- PyCharm & Python ---
+.idea/
+__pycache__/
+*.pyc
+*.pyo
+venv/
+env/
