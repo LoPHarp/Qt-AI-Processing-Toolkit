@@ -1,5 +1,7 @@
 #include "mainwindow.h"
 #include "./ui_mainwindow.h"
+#include <opencv2/opencv.hpp>
+#include <opencv2/dnn.hpp>
 
 #include <QFileDialog>
 
@@ -9,12 +11,24 @@ MainWindow::MainWindow(QWidget *parent)
 {
     ui->setupUi(this);
 
+    ui->treeView->setRootIsDecorated(false);
+    ui->treeView->setIndentation(0);
+    ui->treeView->setHeaderHidden(true);
+
     PyProcess = new QProcess(this);
     connect(PyProcess, &QProcess::readyReadStandardOutput, this, &MainWindow::readPythonOutput);
     connect(PyProcess, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
             this, &MainWindow::onProcessFinished);
 
     ui->progressBar->setVisible(false);
+
+    fileModel = new QFileSystemModel(this);
+    fileModel->setFilter(QDir::NoDotAndDotDot | QDir::Files);
+
+    QStringList filtres;
+    filtres << "*.png" << "*.jpg" << "*.jpeg";
+    fileModel->setNameFilters(filtres);
+    fileModel->setNameFilterDisables(false);
 }
 
 MainWindow::~MainWindow()
@@ -140,5 +154,79 @@ void MainWindow::on_btnTrainModel_clicked()
     args << "train_model.py" << csvPath << targetAcc << currentModelPath;
 
     PyProcess->start("python", args);
+}
+
+
+void MainWindow::processAndDisplayImage(const QString &imagePath)
+{
+    if(currentModelPath.isEmpty() || imagePath.isEmpty()) return;
+
+    cv::dnn::Net net = cv::dnn::readNetFromONNX(currentModelPath.toStdString());
+    cv::Mat image = cv::imread(imagePath.toStdString());
+    if(image.empty()) return;
+
+    cv::Mat blob;
+    cv::dnn::blobFromImage(image, blob, 1.0/255, cv::Size(96, 96), cv::Scalar(), true, false);
+
+    net.setInput(blob);
+    cv::Mat output = net.forward();
+
+    std::vector<float> predictions;
+    for (int i = 0; i < output.cols; i++)
+        predictions.push_back(output.at<float>(0, i));
+
+    int originalW = image.cols;
+    int originalH = image.rows;
+
+    for (size_t i = 0; i < predictions.size(); i += 2)
+    {
+        float x = predictions[i] * originalW;
+        float y = predictions[i+1] * originalH;
+        cv::circle(image, cv::Point(x, y), 3, cv::Scalar(0, 255, 0), -1);
+    }
+
+    cv::cvtColor(image, image, cv::COLOR_BGR2RGB);
+    QImage qImg(image.data, image.cols, image.rows, image.step, QImage::Format_RGB888);
+
+    ui->imageLabel->setPixmap(QPixmap::fromImage(qImg).scaled(ui->imageLabel->size(), Qt::KeepAspectRatio));
+}
+
+
+void MainWindow::on_btnSelectImage_clicked()
+{
+    QString SelectedImagePath = QFileDialog::getOpenFileName(this, "Select Image", "", "Images (*.png *.jpg *.jpeg)");
+    if(SelectedImagePath.isEmpty())
+        return;
+
+    currentImagePath = SelectedImagePath;
+
+    QFileInfo fileInfo(SelectedImagePath);
+    QString folderPath = fileInfo.absolutePath();
+
+    QModelIndex rootIndex = fileModel->setRootPath(folderPath);
+    if(!ui->treeView->model())
+    {
+        ui->treeView->setModel(fileModel);
+        for(int i = 1; i < fileModel->columnCount(); ++i)
+            ui->treeView->hideColumn(i);
+    }
+    ui->treeView->setRootIndex(rootIndex);
+
+    processAndDisplayImage(currentImagePath);
+}
+
+
+void MainWindow::on_btnRedefinePoints_clicked()
+{
+    if(currentImagePath.isEmpty()) return;
+    processAndDisplayImage(currentImagePath);
+}
+
+
+void MainWindow::on_treeView_doubleClicked(const QModelIndex &index)
+{
+    QString path = fileModel->filePath(index);
+    currentImagePath = path;
+    processAndDisplayImage(currentImagePath);
 }
 
