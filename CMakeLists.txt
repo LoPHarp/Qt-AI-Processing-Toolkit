@@ -73,3 +73,4 @@ endif()
 
 file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/train_model.py DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
 file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/training.csv DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
+file(COPY "${CMAKE_SOURCE_DIR}/dataset_tools/haarcascade_frontalface_default.xml" DESTINATION "${CMAKE_BINARY_DIR}")
