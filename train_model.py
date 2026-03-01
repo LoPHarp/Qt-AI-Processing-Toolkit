@@ -1,4 +1,5 @@
 import sys
+import os
 
 sys.stdout.reconfigure(encoding='utf-8')
 sys.stderr.reconfigure(encoding='utf-8')
@@ -8,8 +9,8 @@ import torch.nn as nn
 import torch.optim as optim
 import pandas as pd
 import numpy as np
-
 from torch.utils.data import Dataset, DataLoader
+
 
 class FaceDataset(Dataset):
     def __init__(self, csv_file):
@@ -25,6 +26,7 @@ class FaceDataset(Dataset):
         img = img_array.reshape(1, 96, 96) / 255.0
         pts = row.drop('Image').values.astype(np.float32) / 96.0
         return torch.tensor(img), torch.tensor(pts)
+
 
 class FaceNet(nn.Module):
     def __init__(self):
@@ -47,16 +49,17 @@ class FaceNet(nn.Module):
     def forward(self, x):
         x = self.pool1(self.relu1(self.conv1(x)))
         x = self.pool2(self.relu2(self.conv2(x)))
-
         x = self.flatten(x)
-
         x = self.relu3(self.fc1(x))
         x = self.fc2(x)
-
         return x
+
 
 def train_model(dataset_path, target_acc, save_path):
     try:
+        print(f"\n[!!!] SCRIPT RUNNING FROM: {os.path.abspath(__file__)} [!!!]\n", flush=True)
+        sys.stdout.flush()
+
         dataset = FaceDataset(dataset_path)
         dataloader = DataLoader(dataset, batch_size=32, shuffle=True)
         model = FaceNet()
@@ -83,13 +86,49 @@ def train_model(dataset_path, target_acc, save_path):
             sys.stdout.flush()
             epoch += 1
 
-        dummy_input = torch.randn(1, 1, 96, 96)
-        torch.onnx.export(model, dummy_input, save_path, input_names=['input'], output_names=['output'])
+        print("\n[!!!] EXPORTING VIA LEGACY ONNX [!!!]", flush=True)
+        sys.stdout.flush()
+
+        model.eval()
+        model.to('cpu')
+
+        dummy_input = torch.randn(1, 1, 96, 96, dtype=torch.float32)
+
+        # Обгортка виклику експорта в try-except для сумісності з різними версіями PyTorch
+        try:
+            torch.onnx.export(
+                model,
+                dummy_input,
+                save_path,
+                export_params=True,
+                opset_version=11,
+                do_constant_folding=False,
+                input_names=['input'],
+                output_names=['output'],
+                dynamo=False
+            )
+        except TypeError:
+            torch.onnx.export(
+                model,
+                dummy_input,
+                save_path,
+                export_params=True,
+                opset_version=11,
+                do_constant_folding=False,
+                input_names=['input'],
+                output_names=['output']
+            )
+
+        print("[!!!] EXPORT TRUE COMPLETED [!!!]\n", flush=True)
+        sys.stdout.flush()
         sys.exit(0)
+
     except Exception as e:
         print(f"Error: {e}")
         sys.exit(1)
 
+
 if __name__ == '__main__':
-    if len(sys.argv) != 4: sys.exit(1)
+    if len(sys.argv) != 4:
+        sys.exit(1)
     train_model(sys.argv[1], float(sys.argv[2]), sys.argv[3])

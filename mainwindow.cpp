@@ -1,9 +1,10 @@
 #include "mainwindow.h"
 #include "./ui_mainwindow.h"
-#include <opencv2/opencv.hpp>
 #include <opencv2/dnn.hpp>
 
 #include <QFileDialog>
+#include <QCoreApplication>
+#include <QRandomGenerator>
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -16,6 +17,8 @@ MainWindow::MainWindow(QWidget *parent)
     ui->treeView->setHeaderHidden(true);
 
     PyProcess = new QProcess(this);
+    PyProcess->setProcessChannelMode(QProcess::MergedChannels);
+
     connect(PyProcess, &QProcess::readyReadStandardOutput, this, &MainWindow::readPythonOutput);
     connect(PyProcess, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
             this, &MainWindow::onProcessFinished);
@@ -29,6 +32,15 @@ MainWindow::MainWindow(QWidget *parent)
     filtres << "*.png" << "*.jpg" << "*.jpeg";
     fileModel->setNameFilters(filtres);
     fileModel->setNameFilterDisables(false);
+
+    QString appDir = QCoreApplication::applicationDirPath();
+    QString cascadePath = appDir + "/haarcascade_frontalface_default.xml";
+    if (!faceCascade.load(cascadePath.toStdString())) {
+        qDebug() << "ERROR: Can't load Haar Cascade from:" << cascadePath;
+        ui->btnSelectImage->setEnabled(false);
+    } else {
+        qDebug() << "Face Detector loaded successfully!";
+    }
 }
 
 MainWindow::~MainWindow()
@@ -157,40 +169,81 @@ void MainWindow::on_btnTrainModel_clicked()
 }
 
 
-void MainWindow::processAndDisplayImage(const QString &imagePath)
+void MainWindow::processAndDisplayImage(const QString &imagePath, bool applyJitter)
 {
-    if(currentModelPath.isEmpty() || imagePath.isEmpty()) return;
+    if (PyProcess->state() == QProcess::Running) return;
+    if (currentModelPath.isEmpty() || imagePath.isEmpty()) return;
 
-    cv::dnn::Net net = cv::dnn::readNetFromONNX(currentModelPath.toStdString());
-    cv::Mat image = cv::imread(imagePath.toStdString());
-    if(image.empty()) return;
+    currentImagePath = imagePath;
 
-    cv::Mat blob;
-    cv::dnn::blobFromImage(image, blob, 1.0/255, cv::Size(96, 96), cv::Scalar(), true, false);
-
-    net.setInput(blob);
-    cv::Mat output = net.forward();
-
-    std::vector<float> predictions;
-    for (int i = 0; i < output.cols; i++)
-        predictions.push_back(output.at<float>(0, i));
-
-    int originalW = image.cols;
-    int originalH = image.rows;
-
-    for (size_t i = 0; i < predictions.size(); i += 2)
+    try
     {
-        float x = predictions[i] * originalW;
-        float y = predictions[i+1] * originalH;
-        cv::circle(image, cv::Point(x, y), 3, cv::Scalar(0, 255, 0), -1);
+        cv::dnn::Net net = cv::dnn::readNetFromONNX(currentModelPath.toStdString());
+
+        cv::Mat originalImage = cv::imread(imagePath.toStdString());
+        if (originalImage.empty()) return;
+
+        cv::Mat grayImage;
+        cv::cvtColor(originalImage, grayImage, cv::COLOR_BGR2GRAY);
+        cv::cvtColor(originalImage, originalImage, cv::COLOR_BGR2RGB);
+
+        std::vector<cv::Rect> faces;
+        faceCascade.detectMultiScale(grayImage, faces, 1.1, 4, 0, cv::Size(96, 96));
+
+        if (!faces.empty())
+        {
+            cv::Rect faceRect = faces[0];
+
+            if (applyJitter)
+            {
+                int dx = QRandomGenerator::global()->bounded(-5, 6) * faceRect.width / 100;
+                int dy = QRandomGenerator::global()->bounded(-5, 6) * faceRect.height / 100;
+                int dw = QRandomGenerator::global()->bounded(-5, 6) * faceRect.width / 100;
+                int dh = QRandomGenerator::global()->bounded(-5, 6) * faceRect.height / 100;
+
+                faceRect.x += dx;
+                faceRect.y += dy;
+                faceRect.width += dw;
+                faceRect.height += dh;
+
+                if (faceRect.x < 0) faceRect.x = 0;
+                if (faceRect.y < 0) faceRect.y = 0;
+                if (faceRect.x + faceRect.width > originalImage.cols) faceRect.width = originalImage.cols - faceRect.x;
+                if (faceRect.y + faceRect.height > originalImage.rows) faceRect.height = originalImage.rows - faceRect.y;
+            }
+
+            cv::rectangle(originalImage, faceRect, cv::Scalar(0, 255, 0), 2);
+            cv::Mat faceCrop = grayImage(faceRect);
+
+            cv::Mat blob;
+            cv::dnn::blobFromImage(faceCrop, blob, 1.0/255.0, cv::Size(96, 96), cv::Scalar(), false, false);
+
+            net.setInput(blob);
+            cv::Mat output = net.forward();
+
+            std::vector<float> predictions;
+            for (int i = 0; i < output.cols; i++)
+                predictions.push_back(output.at<float>(0, i));
+
+            for (size_t i = 0; i < predictions.size(); i += 2)
+            {
+                float x_crop = predictions[i] * faceRect.width;
+                float y_crop = predictions[i+1] * faceRect.height;
+
+                float x_original = x_crop + faceRect.x;
+                float y_original = y_crop + faceRect.y;
+
+                cv::circle(originalImage, cv::Point(x_original, y_original), 3, cv::Scalar(0, 255, 0), -1);
+            }
+        }
+
+        QImage qImg(originalImage.data, originalImage.cols, originalImage.rows, originalImage.step, QImage::Format_RGB888);
+        ui->imageLabel->setPixmap(QPixmap::fromImage(qImg).scaled(ui->imageLabel->size(), Qt::KeepAspectRatio));
+
+    } catch (const cv::Exception& e) {
+        qDebug() << "OPENCV ERROR:" << e.what();
     }
-
-    cv::cvtColor(image, image, cv::COLOR_BGR2RGB);
-    QImage qImg(image.data, image.cols, image.rows, image.step, QImage::Format_RGB888);
-
-    ui->imageLabel->setPixmap(QPixmap::fromImage(qImg).scaled(ui->imageLabel->size(), Qt::KeepAspectRatio));
 }
-
 
 void MainWindow::on_btnSelectImage_clicked()
 {
@@ -218,8 +271,8 @@ void MainWindow::on_btnSelectImage_clicked()
 
 void MainWindow::on_btnRedefinePoints_clicked()
 {
-    if(currentImagePath.isEmpty()) return;
-    processAndDisplayImage(currentImagePath);
+    if (!currentImagePath.isEmpty())
+        processAndDisplayImage(currentImagePath, true);
 }
 
 

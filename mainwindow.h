@@ -7,6 +7,9 @@
 #include <QFileInfo>
 #include <QFileSystemModel>
 
+#include <opencv2/opencv.hpp>
+#include <opencv2/objdetect.hpp>
+
 QT_BEGIN_NAMESPACE
 namespace Ui {
 class MainWindow;
@@ -36,12 +39,11 @@ private:
     Ui::MainWindow *ui;
     QProcess *PyProcess;
     QString currentModelPath;
-
-    void setModelAsActive(const QString &path);
-
     QString currentImagePath;
     QFileSystemModel *fileModel;
+    cv::CascadeClassifier faceCascade;
 
-    void processAndDisplayImage(const QString &imagePath);
+    void setModelAsActive(const QString &path);
+    void processAndDisplayImage(const QString &imagePath, bool applyJitter = false);
 };
 #endif // MAINWINDOW_H
