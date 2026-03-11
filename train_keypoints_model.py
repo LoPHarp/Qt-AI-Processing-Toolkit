@@ -94,7 +94,6 @@ def train_model(dataset_path, target_acc, save_path):
 
         dummy_input = torch.randn(1, 1, 96, 96, dtype=torch.float32)
 
-        # Обгортка виклику експорта в try-except для сумісності з різними версіями PyTorch
         try:
             torch.onnx.export(
                 model,

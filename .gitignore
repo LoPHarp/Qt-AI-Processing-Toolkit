@@ -30,7 +30,7 @@ env/
 # Датасеты и данные
 *.csv
 *.xlsx
-!training.csv
+!dataset_keypoints.csv
 !emotion_keypoints.csv
 
 # Ресурсы для тестов

@@ -5,6 +5,7 @@
 #include <QFileDialog>
 #include <QCoreApplication>
 #include <QRandomGenerator>
+#include <QMessageBox>
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -50,38 +51,76 @@ MainWindow::~MainWindow()
 
 void MainWindow::setModelAsActive(const QString &path)
 {
-    if(path.isEmpty())
-        return;
+    if(path.isEmpty()) return;
 
     currentModelPath = path;
 
     QFileInfo fileInfo(path);
     ui->modelNameLabel->setText(fileInfo.fileName());
-    //ui->modelNameLabel->setStyleSheet("color: green; font-weight: bold;");
     ui->modelNameLabel->setStyleSheet("color: #228B22; font-weight: bold; font-size: 14px;");
+}
+
+void MainWindow::setModelZNM1NameLabel(const QString &path)
+{
+    if(path.isEmpty()) return;
+
+    currentModelZNM1Path = path;
+
+    QFileInfo fileInfo(path);
+    ui->modelZNM1NameLabel->setText(fileInfo.fileName());
+    ui->modelZNM1NameLabel->setStyleSheet("color: #228B22; font-weight: bold; font-size: 14px;");
 }
 
 void MainWindow::on_btnSelectModel_clicked()
 {
     QString fileName = QFileDialog::getOpenFileName(this, "Select ONNX Model", "", "ONNX Models (*onnx)");
-    if(fileName.isEmpty())
+    if(fileName.isEmpty()) return;
+
+    if (!fileName.contains("model_keypoints"))
     {
+        QMessageBox::warning(this, "Помилка", "Будь ласка, оберіть правильну модель! Назва файлу має бути наприклад такою - 'model_keypoints_Accuracy_080.onnx'.");
         return;
     }
+
     setModelAsActive(fileName);
+
+    if (!currentImagePath.isEmpty())
+        processAndDisplayImage(currentImagePath);
+}
+
+void MainWindow::on_btnSelectZNM1Model_clicked()
+{
+    QString fileName = QFileDialog::getOpenFileName(this, "Select ZNM1 Model", "", "ONNX Models (*onnx)");
+    if (fileName.isEmpty()) return;
+
+    if (!fileName.contains("Emoties"))
+    {
+        QMessageBox::warning(this, "Помилка", "Будь ласка, оберіть правильну модель! Назва має містити 'Emoties'.");
+        return;
+    }
+
+    setModelZNM1NameLabel(fileName);
+    predictEmotion();
 }
 
 void MainWindow::onProcessFinished(int exitCode, QProcess::ExitStatus exitStatus)
 {
     if(exitCode == 0 && exitStatus == QProcess::NormalExit)
     {
-        ui->progressBar->setValue(100);
-        setModelAsActive(currentModelPath);
+        if (currentProcessType == ProcessKeypoints)
+            setModelAsActive(currentModelPath);
+        else if (currentProcessType == ProcessZNM1)
+        {
+            setModelZNM1NameLabel(currentModelZNM1Path);
+            predictEmotion();
+        }
     }
     else
     {
         ui->progressBar->setFormat("Error / Stopped");
     }
+
+    currentProcessType = ProcessNone;
 
     QTimer::singleShot(2000, this, [this]()
                        {
@@ -141,7 +180,6 @@ void MainWindow::readPythonOutput()
     }
 }
 
-
 void MainWindow::on_btnTrainModel_clicked()
 {
     if (PyProcess->state() == QProcess::Running) {
@@ -160,32 +198,64 @@ void MainWindow::on_btnTrainModel_clicked()
     targetAccFName.replace(",", "");
     targetAccFName.replace(".", "");
 
-    currentModelPath = "model_Accuracy_" + targetAccFName + ".onnx";
+    currentModelPath = "model_keypoints_Accuracy_" + targetAccFName + ".onnx";
+
+    currentProcessType = ProcessKeypoints;
 
     QStringList args;
-    args << "train_model.py" << csvPath << targetAcc << currentModelPath;
+    args << "train_keypoints_model.py" << csvPath << targetAcc << currentModelPath;
 
     PyProcess->start("python", args);
 }
 
+void MainWindow::on_btnTrainZNM1Model_clicked()
+{
+    if (PyProcess->state() == QProcess::Running) {
+        return;
+    }
+
+    QString csvPath = QFileDialog::getOpenFileName(this, "Select Dataset", "", "CSV Files (*.csv)");
+    if(csvPath.isEmpty()) return;
+
+    ui->progressBar->setVisible(true);
+    ui->progressBar->setValue(0);
+
+    QString targetAcc = QString::number(ui->targetAccZnm1SpinBox->value());
+
+    QString targetAccFName = targetAcc;
+    targetAccFName.replace(",", "");
+    targetAccFName.replace(".", "");
+
+    currentModelPath = "model_keypointsEmoties_Accuracy_" + targetAccFName + ".onnx";
+
+    currentProcessType = ProcessZNM1;
+
+    QStringList args;
+    args << "train_znm1.py" << csvPath << targetAcc << currentModelPath;
+
+    PyProcess->start("python", args);
+}
 
 void MainWindow::processAndDisplayImage(const QString &imagePath, bool applyJitter)
 {
     if (PyProcess->state() == QProcess::Running) return;
-    if (currentModelPath.isEmpty() || imagePath.isEmpty()) return;
+    if (imagePath.isEmpty()) return;
 
     currentImagePath = imagePath;
 
+    ui->predictedEmotionLabel->setText("Emotion: -");
+    currentKeypoints.clear();
+
     try
     {
-        cv::dnn::Net net = cv::dnn::readNetFromONNX(currentModelPath.toStdString());
-
         cv::Mat originalImage = cv::imread(imagePath.toStdString());
         if (originalImage.empty()) return;
 
+        cv::Mat displayImage = originalImage.clone();
+        cv::cvtColor(displayImage, displayImage, cv::COLOR_BGR2RGB);
+
         cv::Mat grayImage;
         cv::cvtColor(originalImage, grayImage, cv::COLOR_BGR2GRAY);
-        cv::cvtColor(originalImage, originalImage, cv::COLOR_BGR2RGB);
 
         std::vector<cv::Rect> faces;
         faceCascade.detectMultiScale(grayImage, faces, 1.1, 4, 0, cv::Size(96, 96));
@@ -212,35 +282,46 @@ void MainWindow::processAndDisplayImage(const QString &imagePath, bool applyJitt
                 if (faceRect.y + faceRect.height > originalImage.rows) faceRect.height = originalImage.rows - faceRect.y;
             }
 
-            cv::rectangle(originalImage, faceRect, cv::Scalar(0, 255, 0), 2);
             cv::Mat faceCrop = grayImage(faceRect);
-
             cv::Mat blob;
             cv::dnn::blobFromImage(faceCrop, blob, 1.0/255.0, cv::Size(96, 96), cv::Scalar(), false, false);
 
-            net.setInput(blob);
-            cv::Mat output = net.forward();
-
-            std::vector<float> predictions;
-            for (int i = 0; i < output.cols; i++)
-                predictions.push_back(output.at<float>(0, i));
-
-            for (size_t i = 0; i < predictions.size(); i += 2)
+            if (!currentModelPath.isEmpty())
             {
-                float x_crop = predictions[i] * faceRect.width;
-                float y_crop = predictions[i+1] * faceRect.height;
+                cv::dnn::Net net = cv::dnn::readNetFromONNX(currentModelPath.toStdString());
+                net.setInput(blob);
+                cv::Mat output = net.forward();
 
-                float x_original = x_crop + faceRect.x;
-                float y_original = y_crop + faceRect.y;
+                for (int i = 0; i < output.cols; i++)
+                    currentKeypoints.push_back(output.at<float>(0, i));
 
-                cv::circle(originalImage, cv::Point(x_original, y_original), 3, cv::Scalar(0, 255, 0), -1);
+                if (ui->tabWidget->currentIndex() == 0)
+                {
+                    cv::rectangle(displayImage, faceRect, cv::Scalar(0, 255, 0), 2);
+
+                    for (size_t i = 0; i < currentKeypoints.size(); i += 2)
+                    {
+                        float x_crop = currentKeypoints[i] * faceRect.width;
+                        float y_crop = currentKeypoints[i+1] * faceRect.height;
+
+                        float x_original = x_crop + faceRect.x;
+                        float y_original = y_crop + faceRect.y;
+
+                        cv::circle(displayImage, cv::Point(x_original, y_original), 3, cv::Scalar(0, 255, 0), -1);
+                    }
+                }
             }
         }
 
-        QImage qImg(originalImage.data, originalImage.cols, originalImage.rows, originalImage.step, QImage::Format_RGB888);
+        if (!currentKeypoints.empty() && !currentModelZNM1Path.isEmpty())
+            predictEmotion();
+
+        QImage qImg(displayImage.data, displayImage.cols, displayImage.rows, displayImage.step, QImage::Format_RGB888);
         ui->imageLabel->setPixmap(QPixmap::fromImage(qImg).scaled(ui->imageLabel->size(), Qt::KeepAspectRatio));
 
-    } catch (const cv::Exception& e) {
+    }
+    catch (const cv::Exception& e)
+    {
         qDebug() << "OPENCV ERROR:" << e.what();
     }
 }
@@ -268,13 +349,11 @@ void MainWindow::on_btnSelectImage_clicked()
     processAndDisplayImage(currentImagePath);
 }
 
-
 void MainWindow::on_btnRedefinePoints_clicked()
 {
     if (!currentImagePath.isEmpty())
         processAndDisplayImage(currentImagePath, true);
 }
-
 
 void MainWindow::on_treeView_doubleClicked(const QModelIndex &index)
 {
@@ -283,3 +362,41 @@ void MainWindow::on_treeView_doubleClicked(const QModelIndex &index)
     processAndDisplayImage(currentImagePath);
 }
 
+void MainWindow::predictEmotion()
+{
+    if (currentModelZNM1Path.isEmpty()) return;
+    if (currentKeypoints.size() != 30) return;
+
+    try
+    {
+        cv::dnn::Net net = cv::dnn::readNetFromONNX(currentModelZNM1Path.toStdString());
+
+        cv::Mat inputBlob(1, 30, CV_32F, currentKeypoints.data());
+
+        net.setInput(inputBlob);
+        cv::Mat output = net.forward();
+
+        cv::Point classIdPoint;
+        double confidence;
+        cv::minMaxLoc(output, nullptr, &confidence, nullptr, &classIdPoint);
+
+        int emotionId = classIdPoint.x;
+
+        QStringList emotions = {"Anger", "Contempt", "Disgust", "Fear", "Happiness", "Sadness", "Surprise"};
+
+        if (emotionId >= 0 && emotionId < emotions.size())
+            ui->predictedEmotionLabel->setText("Емоція: " + emotions[emotionId]);
+
+    }
+    catch (const cv::Exception& e)
+    {
+        qDebug() << "ONNX ZNM1 ERROR:" << e.what();
+    }
+}
+
+void MainWindow::on_tabWidget_currentChanged(int index)
+{
+    if (!currentImagePath.isEmpty())
+        processAndDisplayImage(currentImagePath);
+    if (index == 1) predictEmotion();
+}
