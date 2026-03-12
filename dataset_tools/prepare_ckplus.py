@@ -39,4 +39,4 @@ def create_dataset(base_dir, output_csv):
 
 
 if __name__ == '__main__':
-    create_dataset('CK+48', 'ckplus_dataset.csv')
+    create_dataset('CK+48', 'emotion_pixels.csv')

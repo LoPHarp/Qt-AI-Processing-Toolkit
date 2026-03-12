@@ -38,11 +38,16 @@ private slots:
     void onProcessFinished(int exitCode, QProcess::ExitStatus exitStatus);
     void on_tabWidget_currentChanged(int index);
 
+    void on_btnSelectZNM2Model_clicked();
+
+    void on_btnTrainZNM2Model_clicked();
+
 private:
     enum ProcessType {
         ProcessNone,
         ProcessKeypoints,
-        ProcessZNM1
+        ProcessZNM1,
+        ProcessZNM2
     };
     ProcessType currentProcessType = ProcessNone;
 
@@ -50,15 +55,19 @@ private:
     QProcess *PyProcess;
     QString currentModelPath;
     QString currentModelZNM1Path;
+    QString currentModelZNM2Path;
     QString currentImagePath;
     QFileSystemModel *fileModel;
     cv::CascadeClassifier faceCascade;
+    cv::Mat currentFaceCrop;
 
     std::vector<float> currentKeypoints;
 
     void predictEmotion();
+    void predictEmotionZNM2();
     void setModelAsActive(const QString &path);
     void setModelZNM1NameLabel(const QString &path);
+    void setModelZNM2NameLabel(const QString &path);
     void processAndDisplayImage(const QString &imagePath, bool applyJitter = false);
 };
 #endif // MAINWINDOW_H

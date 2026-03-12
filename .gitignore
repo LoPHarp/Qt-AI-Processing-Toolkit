@@ -32,7 +32,7 @@ env/
 *.xlsx
 !dataset_keypoints.csv
 !emotion_keypoints.csv
-!ckplus_dataset.csv
+!emotion_pixels.csv
 
 # Ресурсы для тестов
 Test/
