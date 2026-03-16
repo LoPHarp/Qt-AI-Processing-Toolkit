@@ -33,6 +33,7 @@ env/
 !dataset_keypoints.csv
 !emotion_keypoints.csv
 !emotion_pixels.csv
+!emotion_text_dataset.csv
 
 # Ресурсы для тестов
 Test/
