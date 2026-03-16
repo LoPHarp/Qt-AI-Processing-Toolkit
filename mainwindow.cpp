@@ -6,6 +6,9 @@
 #include <QCoreApplication>
 #include <QRandomGenerator>
 #include <QMessageBox>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QFile>
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -36,10 +39,13 @@ MainWindow::MainWindow(QWidget *parent)
 
     QString appDir = QCoreApplication::applicationDirPath();
     QString cascadePath = appDir + "/haarcascade_frontalface_default.xml";
-    if (!faceCascade.load(cascadePath.toStdString())) {
+    if (!faceCascade.load(cascadePath.toStdString()))
+    {
         qDebug() << "ERROR: Can't load Haar Cascade from:" << cascadePath;
         ui->btnSelectImage->setEnabled(false);
-    } else {
+    }
+    else
+    {
         qDebug() << "Face Detector loaded successfully!";
     }
 
@@ -65,7 +71,7 @@ MainWindow::~MainWindow()
 
 void MainWindow::setModelAsActive(const QString &path)
 {
-    if(path.isEmpty()) return;
+    if (path.isEmpty()) return;
 
     currentModelPath = path;
 
@@ -76,7 +82,7 @@ void MainWindow::setModelAsActive(const QString &path)
 
 void MainWindow::setModelZNM1NameLabel(const QString &path)
 {
-    if(path.isEmpty()) return;
+    if (path.isEmpty()) return;
 
     currentModelZNM1Path = path;
 
@@ -87,7 +93,7 @@ void MainWindow::setModelZNM1NameLabel(const QString &path)
 
 void MainWindow::setModelZNM2NameLabel(const QString &path)
 {
-    if(path.isEmpty()) return;
+    if (path.isEmpty()) return;
 
     currentModelZNM2Path = path;
 
@@ -96,10 +102,41 @@ void MainWindow::setModelZNM2NameLabel(const QString &path)
     ui->modelZNM2NameLabel->setStyleSheet("color: #228B22; font-weight: bold; font-size: 14px;");
 }
 
+void MainWindow::setModelRNNNameLabel(const QString &path)
+{
+    if (path.isEmpty()) return;
+
+    currentModelRNNPath = path;
+
+    QFileInfo fileInfo(path);
+    ui->modelRNNNameLabel->setText(fileInfo.fileName());
+    ui->modelRNNNameLabel->setStyleSheet("color: #228B22; font-weight: bold; font-size: 14px;");
+
+    QString vocabPath = fileInfo.absolutePath() + "/vocab_rnn.json";
+    loadRNNVocab(vocabPath);
+}
+
+void MainWindow::loadRNNVocab(const QString &path)
+{
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly))
+    {
+        QMessageBox::warning(this, "Помилка", "Не вдалося знайти vocab_rnn.json поруч із моделлю!");
+        return;
+    }
+
+    QByteArray data = file.readAll();
+    file.close();
+
+    QJsonDocument doc = QJsonDocument::fromJson(data);
+    if (!doc.isNull() && doc.isObject())
+        rnnVocab = doc.object();
+}
+
 void MainWindow::on_btnSelectModel_clicked()
 {
     QString fileName = QFileDialog::getOpenFileName(this, "Select ONNX Model", "", "ONNX Models (*onnx)");
-    if(fileName.isEmpty()) return;
+    if (fileName.isEmpty()) return;
 
     if (!fileName.contains("model_keypoints"))
     {
@@ -144,9 +181,23 @@ void MainWindow::on_btnSelectZNM2Model_clicked()
     if (!currentImagePath.isEmpty()) processAndDisplayImage(currentImagePath);
 }
 
+void MainWindow::on_btnSelectRNNModel_clicked()
+{
+    QString fileName = QFileDialog::getOpenFileName(this, "Select RNN Model", "", "ONNX Models (*onnx)");
+    if (fileName.isEmpty()) return;
+
+    if (!fileName.contains("rnn"))
+    {
+        QMessageBox::warning(this, "Помилка", "Будь ласка, оберіть правильну модель! Назва має містити 'rnn'.");
+        return;
+    }
+
+    setModelRNNNameLabel(fileName);
+}
+
 void MainWindow::onProcessFinished(int exitCode, QProcess::ExitStatus exitStatus)
 {
-    if(exitCode == 0 && exitStatus == QProcess::NormalExit)
+    if (exitCode == 0 && exitStatus == QProcess::NormalExit)
     {
         if (currentProcessType == ProcessKeypoints)
             setModelAsActive(currentModelPath);
@@ -160,6 +211,8 @@ void MainWindow::onProcessFinished(int exitCode, QProcess::ExitStatus exitStatus
             setModelZNM2NameLabel(currentModelZNM2Path);
             predictEmotionZNM2();
         }
+        else if (currentProcessType == ProcessRNN)
+            setModelRNNNameLabel(currentModelRNNPath);
     }
     else
     {
@@ -182,30 +235,36 @@ void MainWindow::readPythonOutput()
     QString text = QString::fromLocal8Bit(InData);
     QStringList lines = text.split("\n");
 
-    for(const QString line : lines)
+    for (const QString line : lines)
     {
         QString cleanLine = line.trimmed();
-        if(cleanLine.isEmpty())
-        {
-            continue;
-        }
+        if (cleanLine.isEmpty()) continue;
 
-        if(cleanLine.startsWith("CURRENT_LEARN_PROGRESS:"))
+        if (cleanLine.startsWith("CURRENT_LEARN_PROGRESS:"))
         {
             QStringList elems = cleanLine.split(" ", Qt::SkipEmptyParts);
 
-            if(elems.size() >= 4)
+            if (elems.size() >= 4)
             {
-                double targetAcc = ui->targetAccSpinBox->value();
+                double targetAcc = 0.7;
+
+                if (currentProcessType == ProcessKeypoints)
+                    targetAcc = ui->targetAccSpinBox->value();
+                else if (currentProcessType == ProcessZNM1)
+                    targetAcc = ui->targetAccZnm1SpinBox->value();
+                else if (currentProcessType == ProcessZNM2)
+                    targetAcc = ui->targetAccZnm2SpinBox->value();
+                else if (currentProcessType == ProcessRNN)
+                    targetAcc = ui->targetAccRnnSpinBox->value();
+
                 double currentAcc = elems[1].toDouble();
                 int epoch = elems[3].toInt();
                 double startAcc = 0.3;
 
                 double progress = 0.0;
-                if(targetAcc > startAcc)
-                {
+                if (targetAcc > startAcc)
                     progress = (currentAcc - startAcc) / (targetAcc - startAcc);
-                }
+
                 int progressValue = static_cast<int>(progress * 100);
                 if (progressValue < 0) progressValue = 0;
                 if (progressValue > 100) progressValue = 100;
@@ -228,12 +287,10 @@ void MainWindow::readPythonOutput()
 
 void MainWindow::on_btnTrainModel_clicked()
 {
-    if (PyProcess->state() == QProcess::Running) {
-        return;
-    }
+    if (PyProcess->state() == QProcess::Running) return;
 
     QString csvPath = QFileDialog::getOpenFileName(this, "Select Dataset", "", "CSV Files (*.csv)");
-    if(csvPath.isEmpty()) return;
+    if (csvPath.isEmpty()) return;
 
     ui->progressBar->setVisible(true);
     ui->progressBar->setValue(0);
@@ -256,12 +313,10 @@ void MainWindow::on_btnTrainModel_clicked()
 
 void MainWindow::on_btnTrainZNM1Model_clicked()
 {
-    if (PyProcess->state() == QProcess::Running) {
-        return;
-    }
+    if (PyProcess->state() == QProcess::Running) return;
 
     QString csvPath = QFileDialog::getOpenFileName(this, "Select Dataset", "", "CSV Files (*.csv)");
-    if(csvPath.isEmpty()) return;
+    if (csvPath.isEmpty()) return;
 
     ui->progressBar->setVisible(true);
     ui->progressBar->setValue(0);
@@ -287,7 +342,7 @@ void MainWindow::on_btnTrainZNM2Model_clicked()
     if (PyProcess->state() == QProcess::Running) return;
 
     QString csvPath = QFileDialog::getOpenFileName(this, "Select Dataset", "", "CSV Files (*.csv)");
-    if(csvPath.isEmpty()) return;
+    if (csvPath.isEmpty()) return;
 
     ui->progressBar->setVisible(true);
     ui->progressBar->setValue(0);
@@ -304,6 +359,32 @@ void MainWindow::on_btnTrainZNM2Model_clicked()
 
     QStringList args;
     args << "train_znm2.py" << csvPath << targetAcc << currentModelZNM2Path;
+
+    PyProcess->start("python", args);
+}
+
+void MainWindow::on_btnTrainRNN_clicked()
+{
+    if (PyProcess->state() == QProcess::Running) return;
+
+    QString csvPath = QFileDialog::getOpenFileName(this, "Select Dataset", "", "CSV Files (*.csv)");
+    if (csvPath.isEmpty()) return;
+
+    ui->progressBar->setVisible(true);
+    ui->progressBar->setValue(0);
+
+    QString targetAcc = QString::number(ui->targetAccRnnSpinBox->value());
+
+    QString targetAccFName = targetAcc;
+    targetAccFName.replace(",", "");
+    targetAccFName.replace(".", "");
+
+    currentModelRNNPath = "model_rnn_Accuracy_" + targetAccFName + ".onnx";
+
+    currentProcessType = ProcessRNN;
+
+    QStringList args;
+    args << "train_text_model.py" << csvPath << targetAcc << currentModelRNNPath;
 
     PyProcess->start("python", args);
 }
@@ -415,8 +496,7 @@ void MainWindow::processAndDisplayImage(const QString &imagePath, bool applyJitt
 void MainWindow::on_btnSelectImage_clicked()
 {
     QString SelectedImagePath = QFileDialog::getOpenFileName(this, "Select Image", "", "Images (*.png *.jpg *.jpeg)");
-    if(SelectedImagePath.isEmpty())
-        return;
+    if (SelectedImagePath.isEmpty()) return;
 
     currentImagePath = SelectedImagePath;
 
@@ -424,10 +504,10 @@ void MainWindow::on_btnSelectImage_clicked()
     QString folderPath = fileInfo.absolutePath();
 
     QModelIndex rootIndex = fileModel->setRootPath(folderPath);
-    if(!ui->treeView->model())
+    if (!ui->treeView->model())
     {
         ui->treeView->setModel(fileModel);
-        for(int i = 1; i < fileModel->columnCount(); ++i)
+        for (int i = 1; i < fileModel->columnCount(); ++i)
             ui->treeView->hideColumn(i);
     }
     ui->treeView->setRootIndex(rootIndex);
@@ -513,7 +593,56 @@ void MainWindow::predictEmotionZNM2()
 
 void MainWindow::on_tabWidget_currentChanged(int index)
 {
-    if (!currentImagePath.isEmpty())
+    if (!currentImagePath.isEmpty() && index == 0)
         processAndDisplayImage(currentImagePath);
 }
 
+void MainWindow::on_btnAnalyzeText_clicked()
+{
+    if (currentModelRNNPath.isEmpty()) return;
+    if (rnnVocab.isEmpty()) return;
+
+    QString rawText = ui->textInputEdit->toPlainText();
+    if (rawText.trimmed().isEmpty()) return;
+
+    QString cleanText = rawText.toLower();
+    cleanText.replace(QRegularExpression("[^a-z\\s]"), " ");
+    cleanText = cleanText.simplified();
+
+    QStringList words = cleanText.split(" ", Qt::SkipEmptyParts);
+
+    const int MAX_SEQ_LENGTH = 50;
+    std::vector<int> tokens(MAX_SEQ_LENGTH, 0);
+
+    for (int i = 0; i < words.size() && i < MAX_SEQ_LENGTH; ++i)
+    {
+        QString word = words[i];
+        if (rnnVocab.contains(word)) tokens[i] = rnnVocab.value(word).toInt();
+        else tokens[i] = 1;
+    }
+
+    try
+    {
+        cv::dnn::Net net = cv::dnn::readNetFromONNX(currentModelRNNPath.toStdString());
+
+        cv::Mat inputBlob(1, MAX_SEQ_LENGTH, CV_32S, tokens.data());
+
+        net.setInput(inputBlob);
+        cv::Mat output = net.forward();
+
+        cv::Point classIdPoint;
+        double confidence;
+        cv::minMaxLoc(output, nullptr, &confidence, nullptr, &classIdPoint);
+
+        int emotionId = classIdPoint.x;
+
+        QStringList emotions = {"Sadness", "Joy", "Love", "Anger", "Fear", "Surprise"};
+
+        if (emotionId >= 0 && emotionId < emotions.size())
+            ui->predictedTextEmotionLabel->setText("Emotion: " + emotions[emotionId]);
+    }
+    catch (const cv::Exception& e)
+    {
+        qDebug() << "ONNX RNN ERROR:" << e.what();
+    }
+}
